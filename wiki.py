@@ -2,27 +2,31 @@
 
 import argparse
 import concurrent.futures
-import threading
+import asyncio
 
 import wikipedia
 from rich import print, pretty
 from rich.columns import Columns
 from rich.panel import Panel
 from rich.pretty import Pretty
+from rich.progress import Progress
 
 pretty.install()
-thread_local = threading.local()
 
 
 # sub-command functions
-def search(args):
+async def search(args):
     kwards = args._get_kwargs()
     search_query = kwards.__getitem__(0).__getitem__(1)
     is_all = kwards.__getitem__(1).__getitem__(1)
 
-    results = get_search_results(search_query, display_all=is_all)
+    with Progress(transient=True) as progress:
+        task = progress.add_task(f"[cyan]Searching {search_query}...", total=None, start=False)
+        results = await get_search_results(search_query, display_all=is_all)
+        while not results:
+            progress.update(task)
 
-    print('There what we found:')
+    print('[b]There what we found:[/b]')
     print(results)
 
 
@@ -35,12 +39,13 @@ def open_page(args):
 
 
 # utility functions
-def get_search_results(search_query, display_all=False):
+async def get_search_results(search_query, display_all=False):
     pages = wikipedia.search(search_query)
 
     if display_all:
         with concurrent.futures.ProcessPoolExecutor() as executor:
             futures = [executor.submit(get_page_summary, page) for page in pages]
+            await asyncio.sleep(1)
 
         pages_renderables = [Panel(f.result()) for f in concurrent.futures.as_completed(futures)]
 
@@ -52,7 +57,7 @@ def get_search_results(search_query, display_all=False):
 def get_page_summary(page):
     title = page
     summary = wikipedia.summary(page, sentences=1)
-    return f"[b]{title}[/b]\n[yellow]{summary}"
+    return f"{title}\n[yellow]{summary}"
 
 
 # create the top-level parser
@@ -71,4 +76,4 @@ parser_search.add_argument('Page title', type=str)
 parser_search.set_defaults(func=open_page)
 
 args = parser.parse_args()
-args.func(args)
+asyncio.run(args.func(args))
